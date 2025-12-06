@@ -15,6 +15,7 @@ from src.graphics import (
     property_type_mix
 )
 
+# ---------------- datos y servicio ----------------
 df = load_data()
 ms = ModelService(df)
 bounds = dataset_bounds(df)
@@ -29,6 +30,8 @@ HERO_IMAGES = [f"/assets/Fotos/hero{i}.jpg" for i in range(1, 9)]
 
 app = Dash(__name__, suppress_callback_exceptions=True)
 server = app.server
+
+# ---------------- helpers visuales ----------------
 
 label = lambda txt: html.Label(
     txt,
@@ -103,6 +106,7 @@ def contact_modal():
         ],
     )
 
+# ---------------- hero ----------------
 
 hero = html.Div(
     id="hero",
@@ -173,6 +177,7 @@ hero = html.Div(
     ],
 )
 
+# ---------------- bloques COMPRADOR ----------------
 
 def buyer_controls():
     return card(
@@ -320,6 +325,7 @@ def buyer_offer_block():
         ]
     )
 
+# ---------------- bloques para el vendedor ----------------
 
 def seller_controls():
     zip_opts = [{"label": str(z), "value": z} for z in postal_list]
@@ -402,11 +408,6 @@ def seller_controls():
                 value=1995,
             ),
             html.Div(id="sell-contact-banner", className="warn mt"),
-            html.Button(
-                "Quiero vender mi casa",
-                id="sell-open-modal",
-                className="btn primary mt",
-            ),
             html.Div(id="sell-warn", className="warn mt"),
         ]
     )
@@ -454,6 +455,7 @@ def seller_results():
         ]
     )
 
+# ---------------- layout ----------------
 
 app.layout = html.Div(
     [
@@ -508,6 +510,7 @@ app.layout = html.Div(
     className="container",
 )
 
+# ---------------- callbacks hero / tabs ----------------
 
 @app.callback(
     Output("tabs", "value"),
@@ -571,6 +574,7 @@ def update_button_styles(active_tab):
         }
     return buyer_style, seller_style
 
+# ---------------- callbacks COMPRADOR ----------------
 
 @app.callback(
     Output("buy-price-min", "value"),
@@ -617,7 +621,14 @@ def buyer_update_map(selected_zip, price_min, price_max, beds_min, zip_pref):
             else "No hay resultados para este filtro."
         )
 
-    sel = selected_zip or zip_pref
+    # prioridad: lo que venga del clic, si no hay, ZIP preferido
+    sel = selected_zip if selected_zip is not None else zip_pref
+
+    if sel is not None:
+        try:
+            sel = int(sel)
+        except Exception:
+            sel = None
 
     chips_div = html.Div(
         [
@@ -774,33 +785,40 @@ def buyer_predict_offer(rows, selected_rows):
     Input("buy-scatter", "clickData"),
     Input("buy-table", "selected_rows"),
     State("buy-table", "derived_virtual_data"),
-    prevent_initial_call=True,
 )
 def sync_selected_zip(map_click, scatter_click, sel_rows, table_rows):
-    ctx = dash.callback_context
-    if not ctx.triggered:
-        return dash.no_update
-    trig = ctx.triggered[0]["prop_id"].split(".")[0]
-    if trig == "buy-map" and map_click:
+    zip_sel = None
+
+    # 1) clic en mapa
+    if map_click:
         try:
             point = map_click["points"][0]
             if "customdata" in point and point["customdata"]:
-                return int(point["customdata"][0])
+                zip_sel = int(point["customdata"][0])
             else:
-                return int(point.get("hovertext"))
+                zip_sel = int(point.get("hovertext"))
         except Exception:
-            return dash.no_update
-    if trig == "buy-table" and sel_rows and table_rows:
-        row = table_rows[sel_rows[0]]
-        if "ZIP OR POSTAL CODE" in row:
-            return int(row["ZIP OR POSTAL CODE"] or 0)
-    if trig == "buy-scatter" and scatter_click:
-        try:
-            return int(scatter_click["points"][0]["customdata"])
-        except Exception:
-            return dash.no_update
-    return dash.no_update
+            pass
 
+    # 2) fila seleccionada en tabla
+    if sel_rows and table_rows:
+        try:
+            row = table_rows[sel_rows[0]]
+            if "ZIP OR POSTAL CODE" in row and row["ZIP OR POSTAL CODE"]:
+                zip_sel = int(row["ZIP OR POSTAL CODE"])
+        except Exception:
+            pass
+
+    # 3) clic en scatter
+    if scatter_click:
+        try:
+            zip_sel = int(scatter_click["points"][0]["customdata"])
+        except Exception:
+            pass
+
+    return zip_sel
+
+# ---------------- callbacks VENDEDOR ----------------
 
 @app.callback(
     Output("sell-warn", "children"),
@@ -917,7 +935,6 @@ def seller_infer(zip_code, beds, baths, sqft, ptype, lot, year):
     )
     return warn, market, html.Div([summary, metrics], className="badge-box"), type_mix_fig, hist_fig, c_map, c_tbl
 
-
 @app.callback(
     Output("sell-modal", "style"),
     Output("sell-contact-banner", "children"),
@@ -925,7 +942,6 @@ def seller_infer(zip_code, beds, baths, sqft, ptype, lot, year):
     Output("sell-contact-email", "value"),
     Output("sell-contact-phone", "value"),
     Output("sell-contact-notes", "value"),
-    Input("sell-open-modal", "n_clicks"),
     Input("hero-sell-cta", "n_clicks"),
     Input("sell-modal-cancel", "n_clicks"),
     Input("sell-modal-send", "n_clicks"),
@@ -936,7 +952,6 @@ def seller_infer(zip_code, beds, baths, sqft, ptype, lot, year):
     prevent_initial_call=True,
 )
 def toggle_contact_modal(
-    open_click,
     hero_open_click,
     cancel_click,
     send_click,
@@ -947,45 +962,25 @@ def toggle_contact_modal(
 ):
     ctx = dash.callback_context
     if not ctx.triggered:
-        return (
-            dash.no_update,
-            dash.no_update,
-            dash.no_update,
-            dash.no_update,
-            dash.no_update,
-            dash.no_update,
-        )
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
     trig = ctx.triggered[0]["prop_id"].split(".")[0]
-    if trig in ("sell-open-modal", "hero-sell-cta"):
-        return (
-            {"display": "flex"},
-            "",
-            name, email, phone, notes,
-        )
+
+    # abrir modal desde el hero
+    if trig == "hero-sell-cta":
+        return {"display": "flex"}, "", name, email, phone, notes
+
+    # cerrar modal
     if trig == "sell-modal-cancel":
-        return (
-            {"display": "none"},
-            dash.no_update,
-            name, email, phone, notes,
-        )
+        return {"display": "none"}, dash.no_update, name, email, phone, notes
+
+    # enviar form
     if trig == "sell-modal-send":
         thanks = f"Gracias {name or ''}. Nos pondremos en contacto con los datos enviados."
-        return (
-            {"display": "none"},
-            thanks,
-            "",
-            "",
-            "",
-            "",
-        )
-    return (
-        dash.no_update,
-        dash.no_update,
-        dash.no_update,
-        dash.no_update,
-        dash.no_update,
-        dash.no_update,
-    )
+        return {"display": "none"}, thanks, "", "", "", ""
+
+    return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
 
 
 if __name__ == "__main__":
